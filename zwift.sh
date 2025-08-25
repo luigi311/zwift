@@ -265,7 +265,7 @@ if [ $WINDOW_MANAGER == "XOrg" ]; then
 fi
 
 
-# Initiate podman Volume with correct permissions
+# Initiate Volume with correct permissions
 if [ "$CONTAINER_TOOL" == "podman" ]; then
     # Create a volume if not already exists, this is done now as
     # if left to the run command the directory can get the wrong permissions
@@ -276,6 +276,25 @@ if [ "$CONTAINER_TOOL" == "podman" ]; then
     GENERAL_FLAGS+=(
         --userns keep-id:uid=$CONTAINER_UID,gid=$CONTAINER_GID
     )
+else
+    # Docker set user and group to run as.
+    GENERAL_FLAGS+=(
+        --user "$ZWIFT_UID:$ZWIFT_GID"
+    )
+
+    ## Docker does not have userns keep-id so we have to set the permissions here.
+    if [[ -z $(docker volume ls | grep zwift-$USER) ]]; then
+        $CONTAINER_TOOL volume create zwift-$USER
+
+        # Mount volume to temp location to set permissions
+        CONTAINER=$($CONTAINER_TOOL create -v zwift-$USER:/data $IMAGE:$VERSION /bin/true)
+        $CONTAINER_TOOL cp --archive --chown=$ZWIFT_UID:$ZWIFT_GID $CONTAINER:/data/. /tmp/zwift-$USER-tmp
+        $CONTAINER_TOOL rm $CONTAINER
+
+        # Copy back to volume with correct permissions
+        $CONTAINER_TOOL run --rm -v zwift-$USER:/data -v /tmp/zwift-$USER-tmp:/tmp-tmp alpine sh -c "cp -a /tmp-tmp/. /data/ && chown -R $ZWIFT_UID:$ZWIFT_GID /data"
+        rm -rf /tmp/zwift-$USER-tmp
+    fi
 fi
 
 # Read the user specified extra flags if any
